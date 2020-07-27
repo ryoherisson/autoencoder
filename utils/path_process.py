@@ -22,3 +22,7 @@ class Paths(object):
         self.ckpt_dir = self.log_dir / 'checkpoint'
         self.ckpt_dir.mkdir(exist_ok=True)
 
+        # image outdir for inference
+        self.img_outdir = self.log_dir / 'images'
+        self.img_outdir.mkdir(exist_ok=True)
+
