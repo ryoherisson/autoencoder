@@ -19,9 +19,9 @@ from utils.dataset import make_datapath_list
 from utils.dataset import DataTransforms, Dataset
 from utils.plot_cmx import plot_confusion_matrix
 from utils.setup_logger import setup_logger
-from models.cnn_classifier import CNNClassifier
+from models.generalizer import Generalizer
 from models.metrics.metrics import Metrics
-from models.networks.network import CNNAutoEncoder
+from models.networks.network import AutoEncoder
 
 logger = getLogger(__name__)
 
@@ -88,11 +88,10 @@ def main():
     ### Network ###
     logger.info('preparing network...')
 
-    network = CNNAutoEncoder(in_channels=configs['n_channels'], n_classes=configs['n_classes'])
+    network = AutoEncoder(in_channels=configs['n_channels'])
 
     network = network.to(device)
-    cnn_criterion = nn.CrossEntropyLoss()
-    ae_criterion = nn.MSELoss()
+    criterion = nn.MSELoss()
     optimizer = optim.Adam(network.parameters(), lr=configs['lr'])
 
     if configs['resume']:
@@ -118,17 +117,14 @@ def main():
         network = nn.DataParallel(network)
 
     ### Metrics ###
-    metrics = Metrics(n_classes=configs['n_classes'], classes=configs['classes'], writer=writer, 
-                      metrics_dir=paths.metrics_dir, plot_confusion_matrix=plot_confusion_matrix)
+    metrics = Metrics(writer=writer, metrics_dir=paths.metrics_dir)
 
     ### Train or Test ###
     kwargs = {
         'device': device,
         'network': network,
         'optimizer': optimizer,
-        'criterions': (cnn_criterion, ae_criterion),
-        'classification_loss_weight': configs['classification_loss_weight'],
-        'autoencoder_loss_weight': configs['autoencoder_loss_weight'],
+        'criterion': criterion,
         'data_loaders': (train_loader, test_loader),
         'metrics': metrics,
         'writer': writer,
@@ -137,16 +133,16 @@ def main():
         'ckpt_dir': paths.ckpt_dir,
     }
 
-    cnn_classifier = CNNClassifier(**kwargs)
+    generalizer = Generalizer(**kwargs)
 
     if args.inference:
         if not configs['resume']:
             logger.info('No checkpoint found for inference!')
         logger.info('mode: inference\n')
-        cnn_classifier.test(epoch=start_epoch, inference=True)
+        generalizer.test(epoch=start_epoch, inference=True)
     else:
         logger.info('mode: train\n')
-        cnn_classifier.train(n_epochs=configs['n_epochs'], start_epoch=start_epoch)
+        generalizer.train(n_epochs=configs['n_epochs'], start_epoch=start_epoch)
 
 if __name__ == "__main__":
     main()
