@@ -22,10 +22,11 @@ class Generalizer(object):
         self.writer = kwargs['writer']
         self.save_ckpt_interval = kwargs['save_ckpt_interval']
         self.ckpt_dir = kwargs['ckpt_dir']
+        self.img_outdir = kwargs['img_outdir']
 
     def train(self, n_epochs, start_epoch=0):
 
-        min_test_loss = 1e9
+        best_test_loss = 1e9
 
         for epoch in range(start_epoch, n_epochs):
             logger.info(f'\n\n==================== Epoch: {epoch} ====================')
@@ -36,9 +37,8 @@ class Generalizer(object):
             n_total = 0
 
             with tqdm(self.train_loader, ncols=100) as pbar:
-                for idx, (inputs, targets) in enumerate(pbar):
+                for idx, (inputs, fnames) in enumerate(pbar):
                     inputs = inputs.to(self.device)
-                    targets = targets.to(self.device)
 
                     outputs = self.network(inputs)
 
@@ -51,7 +51,7 @@ class Generalizer(object):
 
                     train_loss += loss.item()
 
-                    n_total += targets.size(0)
+                    n_total += inputs.size(0)
 
                     ### logging train loss
                     pbar.set_postfix(OrderedDict(
@@ -74,9 +74,9 @@ class Generalizer(object):
             logger.info('### test:')
             test_loss = self.test(epoch)
 
-            if test_loss < min_test_loss:
+            if test_loss < best_test_loss:
                 logger.info(f'saving best checkpoint (epoch: {epoch})...')
-                min_test_loss = test_loss
+                best_test_loss = test_loss
                 self._save_ckpt(epoch, train_loss/(idx+1), mode='best')
 
     def test(self, epoch, inference=False):
@@ -86,33 +86,59 @@ class Generalizer(object):
         n_total = 0
 
         with torch.no_grad():
-            with tqdm(self.test_loader, ncols=100) as pbar:
-                    for idx, (inputs, targets) in enumerate(pbar):
+            if inference:
+                with tqdm(self.test_loader, ncols=100) as pbar:
+                        for idx, (inputs, fnames) in enumerate(pbar):
 
-                        inputs = inputs.to(self.device)
-                        targets = targets.to(self.device)
+                            inputs = inputs.to(self.device)
 
-                        outputs = self.network(inputs)
+                            outputs = self.network(inputs)
 
-                        loss = self.criterion(outputs, inputs)
+                            loss = self.criterion(outputs, inputs)
 
-                        self.optimizer.zero_grad()
+                            self.optimizer.zero_grad()
 
-                        test_loss += loss.item()
+                            test_loss += loss.item()
 
-                        n_total += targets.size(0)
+                            n_total += inputs.size(0)
 
-                        ### logging test loss
-                        pbar.set_postfix(OrderedDict(
-                            epoch="{:>10}".format(epoch),
-                            loss="{:.4f}".format(test_loss / n_total)))
+                            ### logging test loss
+                            pbar.set_postfix(OrderedDict(
+                                epoch="{:>10}".format(epoch),
+                                loss="{:.4f}".format(test_loss / n_total)))
 
-            # logging train loss in ternsorboard and save as csv
-            self.metrics.logging(epoch, test_loss/n_total, mode='test')
-            self.metrics.save_csv(epoch, test_loss/n_total, mode='test')
+                            for i, out in enumerate(outputs):
+                                torchvision.utils.save_image(out, f"./{self.img_outdir}/{fnames[i]}")
 
-            # save image in tensorboard
-            self._save_images(epoch, inputs.cpu()[:2], outputs.detach().cpu()[:2], prefix='val')
+                return 0
+
+            else:
+                with tqdm(self.test_loader, ncols=100) as pbar:
+                        for idx, (inputs, fnames) in enumerate(pbar):
+
+                            inputs = inputs.to(self.device)
+
+                            outputs = self.network(inputs)
+
+                            loss = self.criterion(outputs, inputs)
+
+                            self.optimizer.zero_grad()
+
+                            test_loss += loss.item()
+
+                            n_total += inputs.size(0)
+
+                            ### logging test loss
+                            pbar.set_postfix(OrderedDict(
+                                epoch="{:>10}".format(epoch),
+                                loss="{:.4f}".format(test_loss / n_total)))
+
+                # logging train loss in ternsorboard and save as csv
+                self.metrics.logging(epoch, test_loss/n_total, mode='test')
+                self.metrics.save_csv(epoch, test_loss/n_total, mode='test')
+
+                # save image in tensorboard
+                self._save_images(epoch, inputs.cpu()[:2], outputs.detach().cpu()[:2], prefix='val')
 
         return test_loss / n_total
 
