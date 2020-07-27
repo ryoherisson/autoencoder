@@ -12,30 +12,24 @@ def make_datapath_list(root='./dataset', train_csv='train.csv', test_csv='test.c
     test_csv_path = Path(root) / test_csv
 
     train_img_list = list()
-    train_lbl_list  = list()
     
     train_df = pd.read_csv(train_csv_path)
 
     for _, row in train_df.iterrows():
         img_filename = row['filename']
         img_path = Path(root) / 'images' / img_filename
-        img_label = row['label']
         train_img_list.append(img_path)
-        train_lbl_list.append(img_label)
 
     test_img_list = list()
-    test_lbl_list  = list()
     
     test_df = pd.read_csv(test_csv_path)
 
     for _, row in test_df.iterrows():
         img_filename = row['filename']
         img_path = Path(root) / 'images' / img_filename
-        img_label = row['label']
         test_img_list.append(img_path)
-        test_lbl_list.append(img_label)
 
-    return train_img_list, train_lbl_list, test_img_list, test_lbl_list
+    return train_img_list, test_img_list
 
 
 class DataTransforms():
@@ -61,9 +55,8 @@ class DataTransforms():
 
 
 class Dataset(data.Dataset):
-    def __init__(self, img_list, lbl_list, transform):
+    def __init__(self, img_list, transform):
         self.img_list = img_list
-        self.lbl_list = lbl_list
         self.transform = transform
 
     def __len__(self):
@@ -74,6 +67,9 @@ class Dataset(data.Dataset):
         img = Image.open(img_filepath)
         img = self.transform(img)
 
-        lbl = self.lbl_list[index]
+        fname = self.get_filename(img_filepath)
 
-        return img, lbl
+        return img, fname
+
+    def get_filename(self, img_filepath):
+        return str(Path(img_filepath).name)
