@@ -11,14 +11,12 @@ import torchvision
 
 logger = getLogger(__name__)
 
-class CNNClassifier(object):
+class Generalizer(object):
     def __init__(self, **kwargs):
         self.device = kwargs['device']
         self.network = kwargs['network']
         self.optimizer = kwargs['optimizer']
-        self.cnn_criterion, self.ae_criterion = kwargs['criterions']
-        self.clf_loss_weight = kwargs['classification_loss_weight']
-        self.ae_loss_weight = kwargs['autoencoder_loss_weight']
+        self.criterion = kwargs['criterion']
         self.train_loader, self.test_loader = kwargs['data_loaders']
         self.metrics = kwargs['metrics']
         self.writer = kwargs['writer']
@@ -27,7 +25,7 @@ class CNNClassifier(object):
 
     def train(self, n_epochs, start_epoch=0):
 
-        best_accuracy = 0
+        min_test_loss = 1e9
 
         for epoch in range(start_epoch, n_epochs):
             logger.info(f'\n\n==================== Epoch: {epoch} ====================')
@@ -35,7 +33,6 @@ class CNNClassifier(object):
             self.network.train()
 
             train_loss = 0
-            n_correct = 0
             n_total = 0
 
             with tqdm(self.train_loader, ncols=100) as pbar:
@@ -43,12 +40,9 @@ class CNNClassifier(object):
                     inputs = inputs.to(self.device)
                     targets = targets.to(self.device)
 
-                    clf_out, ae_out = self.network(inputs)
+                    outputs = self.network(inputs)
 
-                    clf_loss = self.cnn_criterion(clf_out, targets)
-                    ae_loss = self.ae_criterion(ae_out, inputs)
-
-                    loss = self.clf_loss_weight * clf_loss + self.ae_loss_weight * ae_loss
+                    loss = self.criterion(outputs, inputs)
 
                     loss.backward()
 
@@ -57,28 +51,16 @@ class CNNClassifier(object):
 
                     train_loss += loss.item()
 
-                    pred = clf_out.argmax(axis=1)
                     n_total += targets.size(0)
-                    n_correct += (pred == targets).sum().item()
 
-                    accuracy = 100.0 * n_correct / n_total
-
-                    self.metrics.update(
-                        preds=pred.cpu().detach().clone(),
-                        targets=targets.cpu().detach().clone(),
-                        loss=train_loss / n_total,
-                        accuracy=accuracy,
-                    )
-
-                    ### logging train loss and accuracy
+                    ### logging train loss
                     pbar.set_postfix(OrderedDict(
                         epoch="{:>10}".format(epoch),
-                        loss="{:.4f}".format(train_loss / n_total),
-                        acc="{:.4f}".format(accuracy)))
+                        loss="{:.4f}".format(train_loss / n_total)))
 
-            # calc loss, accuracy, precision, reacall, f1score and save as csv
-            self.metrics.calc_metrics(epoch, mode='train')
-            self.metrics.init_cmx()
+            # logging train loss in ternsorboard and save as csv
+            self.metrics.logging(epoch, train_loss/n_total, mode='train')
+            self.metrics.save_csv(epoch, train_loss/n_total, mode='train')
 
             # save checkpoint
             if epoch % self.save_ckpt_interval == 0:
@@ -86,24 +68,22 @@ class CNNClassifier(object):
                 self._save_ckpt(epoch, train_loss/(idx+1))
 
             # save image in tensorboard
-            self._save_images(epoch, inputs.cpu()[:2], ae_out.detach().cpu()[:2], prefix='train')
+            self._save_images(epoch, inputs.cpu()[:2], outputs.detach().cpu()[:2], prefix='train')
 
             ### test
             logger.info('### test:')
-            test_accuracy = self.test(epoch)
+            test_loss = self.test(epoch)
 
-            if test_accuracy > best_accuracy:
+            if test_loss < min_test_loss:
                 logger.info(f'saving best checkpoint (epoch: {epoch})...')
-                best_accuracy = test_accuracy
+                min_test_loss = test_loss
                 self._save_ckpt(epoch, train_loss/(idx+1), mode='best')
 
     def test(self, epoch, inference=False):
         self.network.eval()
     
         test_loss = 0
-        n_correct = 0
         n_total = 0
-        preds_t = torch.tensor([])
 
         with torch.no_grad():
             with tqdm(self.test_loader, ncols=100) as pbar:
@@ -112,45 +92,29 @@ class CNNClassifier(object):
                         inputs = inputs.to(self.device)
                         targets = targets.to(self.device)
 
-                        clf_out, ae_out = self.network(inputs)
+                        outputs = self.network(inputs)
 
-                        clf_loss = self.cnn_criterion(clf_out, targets)
-                        ae_loss = self.ae_criterion(ae_out, inputs)
-
-                        loss = self.clf_loss_weight * clf_loss + self.ae_loss_weight * ae_loss
+                        loss = self.criterion(outputs, inputs)
 
                         self.optimizer.zero_grad()
 
                         test_loss += loss.item()
 
-                        pred = clf_out.argmax(axis=1)
                         n_total += targets.size(0)
-                        n_correct += (pred == targets).sum().item()
 
-                        accuracy = 100.0 * n_correct / n_total
-
-                        self.metrics.update(
-                            preds=pred.cpu().detach().clone(),
-                            targets=targets.cpu().detach().clone(),
-                            loss=test_loss / n_total,
-                            accuracy=accuracy,
-                        )
-
-                        ### logging test loss and accuracy
+                        ### logging test loss
                         pbar.set_postfix(OrderedDict(
                             epoch="{:>10}".format(epoch),
-                            loss="{:.4f}".format(test_loss / n_total),
-                            acc="{:.4f}".format(accuracy)))
+                            loss="{:.4f}".format(test_loss / n_total)))
+
+            # logging train loss in ternsorboard and save as csv
+            self.metrics.logging(epoch, test_loss/n_total, mode='test')
+            self.metrics.save_csv(epoch, test_loss/n_total, mode='test')
 
             # save image in tensorboard
-            self._save_images(epoch, inputs.cpu()[:2], ae_out.detach().cpu()[:2], prefix='val')
+            self._save_images(epoch, inputs.cpu()[:2], outputs.detach().cpu()[:2], prefix='val')
 
-            # calc loss, accuracy, precision, reacall, f1score and save as csv
-            # if inference is True, save confusion matrix as png
-            self.metrics.calc_metrics(epoch, mode='test', inference=inference)
-            self.metrics.init_cmx()
-
-        return accuracy
+        return test_loss / n_total
 
     def _save_ckpt(self, epoch, loss, mode=None, zfill=4):
         if isinstance(self.network, nn.DataParallel):
@@ -159,7 +123,7 @@ class CNNClassifier(object):
             network = self.network
 
         if mode == 'best':
-            ckpt_path = self.ckpt_dir / 'best_acc_ckpt.pth'
+            ckpt_path = self.ckpt_dir / 'best_loss_ckpt.pth'
         else:
             ckpt_path = self.ckpt_dir / f'epoch{str(epoch).zfill(zfill)}_ckpt.pth'
 
