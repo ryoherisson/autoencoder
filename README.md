@@ -1,4 +1,4 @@
-# AutoEncoder with pytorch
+# AutoEncoder in pytorch
 This is a pytorch implementation of AutoEncoder. 
 
 ## Requirements
